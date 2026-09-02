@@ -5,6 +5,10 @@
   "version": "0.2.7",
   "publisher": "Gabrielzv1233",
   "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabrielzv1233/DepDetangler.git"
+  },
   "engines": {
     "vscode": "^1.95.0"
   },
