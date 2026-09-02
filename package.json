@@ -1,0 +1,161 @@
+{
+  "name": "depdetangler",
+  "displayName": "DepDetangler",
+  "description": "Dependency Detangler for Python: opinionated, configurable formatting for pip requirements and selected imports.",
+  "version": "0.2.7",
+  "publisher": "Gabrielzv1233",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Formatters",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:depDetangler.sortImports",
+    "onCommand:depDetangler.clearPyPICache",
+    "onLanguage:python",
+    "onLanguage:pip-requirements",
+    "onCommand:depDetangler.organizeImports",
+    "onCommand:depDetangler.sortPackages",
+    "onCommand:depDetangler.organizePackages",
+    "onCommand:depDetangler.sortModules",
+    "onCommand:depDetangler.organizeModules"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "depDetangler.sortImports",
+        "title": "Sort Imports",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.organizeImports",
+        "title": "Organize Imports",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.sortPackages",
+        "title": "Sort Packages",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.organizePackages",
+        "title": "Organize Packages",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.sortModules",
+        "title": "Sort Modules",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.organizeModules",
+        "title": "Organize Modules",
+        "category": "DepDetangler"
+      },
+      {
+        "command": "depDetangler.clearPyPICache",
+        "title": "Clear PyPI Metadata Cache",
+        "category": "DepDetangler"
+      }
+    ],
+    "configuration": {
+      "title": "DepDetangler",
+      "properties": {
+        "depDetangler.requirements.extraMode": {
+          "type": "string",
+          "enum": [
+            "merge",
+            "preserve",
+            "individual"
+          ],
+          "enumDescriptions": [
+            "Merge extras from duplicate package entries into one requirement.",
+            "Keep distinct extra selections on separate lines while sharing the resolved version.",
+            "Enforce one extra per requirement line and group packages only when they contain more than one distinct extra."
+          ],
+          "default": "merge",
+          "description": "How duplicate package extras are emitted."
+        },
+        "depDetangler.requirements.normalizeExtras": {
+          "type": "boolean",
+          "default": true,
+          "description": "Normalize non-authoritative extra names to lowercase with hyphens."
+        },
+        "depDetangler.requirements.pypiNameLookup": {
+          "type": "string",
+          "enum": [
+            "off",
+            "modules",
+            "extras",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Do not use installed/PyPI metadata to restore names.",
+            "Restore package/module distribution names only.",
+            "Restore extra names only.",
+            "Restore both package names and extra names."
+          ],
+          "default": "both",
+          "description": "Which names to restore from installed metadata, with PyPI as fallback."
+        },
+        "depDetangler.requirements.preferInstalledMetadata": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check local Python distribution metadata before querying PyPI."
+        },
+        "depDetangler.requirements.cacheTtlDays": {
+          "type": "number",
+          "minimum": 0,
+          "default": 7,
+          "description": "PyPI metadata cache lifetime in days. Stale data remains a fallback when PyPI is unavailable."
+        },
+        "depDetangler.python.collapseMultilineImports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Collapse recognized multiline from-imports to one line."
+        },
+        "depDetangler.python.expandMultiImports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always split comma-separated plain imports into individual statements."
+        },
+        "depDetangler.python.alwaysSeparateSingleLines": {
+          "type": "boolean",
+          "default": true,
+          "description": "Split a standalone comma-separated plain import even when Expand Multi Imports is disabled."
+        },
+        "depDetangler.python.separateFromImports": {
+          "type": "boolean",
+          "default": false,
+          "description": "Place from-imports above plain imports with one blank line between the groups."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "key": "shift+alt+f",
+        "command": "depDetangler.sortImports",
+        "when": "editorHasSelection && editorLangId == python"
+      }
+    ]
+  },
+  "scripts": {
+    "test": "node test/run-tests.js"
+  },
+  "keywords": [
+    "python",
+    "pip",
+    "requirements",
+    "dependencies",
+    "imports",
+    "sort",
+    "organize",
+    "packages",
+    "modules"
+  ]
+}
