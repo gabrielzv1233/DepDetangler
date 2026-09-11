@@ -1,0 +1,88 @@
+name: Publish Pre-release Extension
+
+run-name: Publish pre-release VSIX from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: depdetangler-marketplace-prerelease
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Cache npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node24-vsce-3.9.2-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node24-vsce-3.9.2-
+
+      - name: Run tests
+        run: npm test
+
+      - name: Generate prerelease version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "package.json version must be major.minor.patch, got: $BASE_VERSION" >&2
+            exit 1
+          fi
+
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          if (( MINOR % 2 == 0 )); then
+            MINOR=$((MINOR + 1))
+          fi
+
+          PATCH=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          VSIX="depdetangler-${VERSION}-pre.vsix"
+
+          npm pkg set version="$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix=$VSIX" >> "$GITHUB_OUTPUT"
+          echo "Pre-release version: $VERSION"
+
+      - name: Package prerelease VSIX
+        run: npx --yes @vscode/vsce@3.9.2 package --pre-release --out "${{ steps.version.outputs.vsix }}"
+
+      - name: Upload raw VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.version.outputs.vsix }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish prerelease to VS Code Marketplace
+        id: publish
+        continue-on-error: true
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@3.9.2 publish --pre-release --packagePath "${{ steps.version.outputs.vsix }}"
+
+      - name: Fail workflow if Marketplace publish failed
+        if: steps.publish.outcome != 'success'
+        run: |
+          echo "Marketplace publishing failed. The VSIX artifact was uploaded successfully before publishing was attempted." >&2
+          exit 1
