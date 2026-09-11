@@ -126,4 +126,90 @@ eq(
     'standalone dependency comments are left untouched',
 );
 
+eq(
+    formatPyprojectDependencies([
+        "['project']",
+        "'dependencies' = [\"a\", \"bbbb\"]",
+    ].join('\n')),
+    [
+        "['project']",
+        "'dependencies' = [\"bbbb\", \"a\"]",
+    ].join('\n'),
+    'single-quoted project table and dependencies key are recognized',
+);
+
+eq(
+    formatPyprojectDependencies([
+        '["project"]',
+        '"dependencies" = ["a", "bbbb"]',
+    ].join('\n')),
+    [
+        '["project"]',
+        '"dependencies" = ["bbbb", "a"]',
+    ].join('\n'),
+    'double-quoted project table and dependencies key are recognized',
+);
+
+eq(
+    formatPyprojectDependencies('project."dependencies" = ["a", "bbbb"]\n'),
+    'project."dependencies" = ["bbbb", "a"]\n',
+    'quoted dependencies segment in root dotted key is recognized',
+);
+
+eq(
+    formatPyprojectDependencies('"project".\'dependencies\' = ["a", "bbbb"]\n'),
+    '"project".\'dependencies\' = ["bbbb", "a"]\n',
+    'fully quoted root dotted key is recognized',
+);
+
+const slash = String.fromCharCode(92);
+const escapedProjectHeader = `["pro${slash}u006Aect"]`;
+eq(
+    formatPyprojectDependencies([
+        escapedProjectHeader,
+        'dependencies = ["a", "bbbb"]',
+    ].join('\n')),
+    [
+        escapedProjectHeader,
+        'dependencies = ["bbbb", "a"]',
+    ].join('\n'),
+    'escaped basic quoted table keys are decoded semantically',
+);
+
+const unicodeEscape = `${slash}U0001F600`;
+const unicodeInput = `[project]\ndependencies = ["${unicodeEscape}", "abc"]\n`;
+const unicodeExpected = `[project]\ndependencies = ["abc", "${unicodeEscape}"]\n`;
+eq(
+    formatPyprojectDependencies(unicodeInput),
+    unicodeExpected,
+    'TOML Unicode escapes are decoded before dependency sorting',
+);
+
+const quote = '"';
+const escapedQuoteRaw = `${quote}a${slash}${quote}${quote}`;
+const escapedQuoteInput = `[project]\ndependencies = [${escapedQuoteRaw}, "bbb"]\n`;
+const escapedQuoteExpected = `[project]\ndependencies = ["bbb", ${escapedQuoteRaw}]\n`;
+eq(
+    formatPyprojectDependencies(escapedQuoteInput),
+    escapedQuoteExpected,
+    'escaped quotes sort by their decoded TOML value',
+);
+
+const arrayTableBoundary = [
+    '[project]',
+    'dependencies = ["a", "bbbb"]',
+    '[[tool.example]]',
+    'dependencies = ["short", "much-longer"]',
+].join('\n');
+eq(
+    formatPyprojectDependencies(arrayTableBoundary),
+    [
+        '[project]',
+        'dependencies = ["bbbb", "a"]',
+        '[[tool.example]]',
+        'dependencies = ["short", "much-longer"]',
+    ].join('\n'),
+    'array-of-table headers terminate the project table range',
+);
+
 console.log('\nAll pyproject.toml tests passed.');
