@@ -2,20 +2,74 @@ const { strictCompare } = require('./sort');
 
 function readTomlString(text, start) {
     const quote = text[start];
-    const marker = quote.repeat(3);
-    const triple = text.startsWith(marker, start);
+    const triple = text.startsWith(quote.repeat(3), start);
     let index = start + (triple ? 3 : 1);
 
     while (index < text.length) {
-        if (triple && text.startsWith(marker, index)) return index + 3;
-        if (!triple && text[index] === quote) return index + 1;
         if (quote === '"' && text[index] === '\\') {
             index += 2;
             continue;
         }
-        index++;
+
+        if (text[index] !== quote) {
+            index++;
+            continue;
+        }
+
+        let runEnd = index + 1;
+        while (runEnd < text.length && text[runEnd] === quote) runEnd++;
+        const runLength = runEnd - index;
+        if (triple && runLength >= 3) return runEnd;
+        if (!triple) return index + 1;
+        index = runEnd;
     }
     return -1;
+}
+
+function maskTomlNonCode(text) {
+    const masked = text.split('');
+
+    for (let index = 0; index < text.length;) {
+        const char = text[index];
+        if (char === '#') {
+            while (index < text.length && text[index] !== '\n') {
+                if (text[index] !== '\r') masked[index] = ' ';
+                index++;
+            }
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            const end = readTomlString(text, index);
+            const stop = end < 0 ? text.length : end;
+            while (index < stop) {
+                if (text[index] !== '\n' && text[index] !== '\r') masked[index] = ' ';
+                index++;
+            }
+            continue;
+        }
+        index++;
+    }
+    return masked.join('');
+}
+
+function tomlCommentOffsets(text) {
+    const offsets = [];
+    for (let index = 0; index < text.length;) {
+        const char = text[index];
+        if (char === '#') {
+            offsets.push(index);
+            while (index < text.length && text[index] !== '\n') index++;
+            continue;
+        }
+        if (char === '"' || char === "'") {
+            const end = readTomlString(text, index);
+            index = end < 0 ? text.length : end;
+            continue;
+        }
+        index++;
+    }
+    return offsets;
 }
 
 function tomlStringValue(raw) {
@@ -120,8 +174,18 @@ function formatArrayBody(body) {
         });
     }
 
-    const sorted = [...entries].sort((a, b) => strictCompare(a.value, b.value));
     if (lineMode && entries.length === spans.length) {
+        const comments = tomlCommentOffsets(body);
+        const commentsAreAttached = comments.every((offset) => {
+            const lineIndex = lines.findIndex((line) => offset >= line.start && offset < line.end);
+            const entry = entries.find((item) => item.lineIndex === lineIndex);
+            if (!entry) return false;
+            const span = spans.find((item) => item.start >= lines[lineIndex].start && item.start < lines[lineIndex].end);
+            return span && offset >= span.end;
+        });
+        if (!commentsAreAttached) return body;
+
+        const sorted = [...entries].sort((a, b) => strictCompare(a.value, b.value));
         const output = [...lines];
         const slots = entries.map((entry) => entry.lineIndex).sort((a, b) => a - b);
         for (let index = 0; index < slots.length; index++) {
@@ -136,11 +200,18 @@ function formatArrayBody(body) {
         return output.map((line) => line.raw).join('');
     }
 
+    let cursor = 0;
+    for (const span of spans) {
+        if (!/^[\s,]*$/.test(body.slice(cursor, span.start))) return body;
+        cursor = span.end;
+    }
+    if (!/^[\s,]*$/.test(body.slice(cursor))) return body;
+
     const sortedRaw = [...spans]
         .sort((a, b) => strictCompare(a.value, b.value))
         .map((span) => span.raw);
     let result = '';
-    let cursor = 0;
+    cursor = 0;
     for (let index = 0; index < spans.length; index++) {
         result += body.slice(cursor, spans[index].start) + sortedRaw[index];
         cursor = spans[index].end;
@@ -148,11 +219,11 @@ function formatArrayBody(body) {
     return result + body.slice(cursor);
 }
 
-function projectRanges(text) {
+function projectRanges(text, syntax = maskTomlNonCode(text)) {
     const headers = [];
-    const headerPattern = /^[ \t]*\[(?!\[)([^\]\r\n]+)\][ \t]*(?:#.*)?$/gm;
+    const headerPattern = /^[ \t]*\[(?!\[)([^\]\r\n]+)\][ \t]*$/gm;
     let match;
-    while ((match = headerPattern.exec(text))) {
+    while ((match = headerPattern.exec(syntax))) {
         headers.push({ name: match[1].trim(), start: match.index, end: headerPattern.lastIndex });
     }
 
@@ -172,9 +243,10 @@ function projectRanges(text) {
 }
 
 function formatPyprojectDependencies(text) {
+    const syntax = maskTomlNonCode(text);
     const replacements = [];
-    for (const range of projectRanges(text)) {
-        const section = text.slice(range.start, range.end);
+    for (const range of projectRanges(text, syntax)) {
+        const section = syntax.slice(range.start, range.end);
         const pattern = range.dotted
             ? /^[ \t]*project[ \t]*\.[ \t]*dependencies[ \t]*=[ \t]*\[/gm
             : /^[ \t]*dependencies[ \t]*=[ \t]*\[/gm;
