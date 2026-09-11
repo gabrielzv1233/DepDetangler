@@ -73,4 +73,57 @@ const toolSection = [
 ].join('\n');
 eq(formatPyprojectDependencies(toolSection), toolSection, 'tool dependencies are left untouched');
 
+const multilineStringInput = [
+    'summary = """',
+    '[project]',
+    'dependencies = ["inside-long", "x"]',
+    '"""',
+    '[project]',
+    'description = """',
+    'dependencies = ["inside-long", "x"]',
+    '"""',
+    'dependencies = ["a", "bbbb"]',
+].join('\n');
+const multilineStringExpected = [
+    'summary = """',
+    '[project]',
+    'dependencies = ["inside-long", "x"]',
+    '"""',
+    '[project]',
+    'description = """',
+    'dependencies = ["inside-long", "x"]',
+    '"""',
+    'dependencies = ["bbbb", "a"]',
+].join('\n');
+eq(
+    formatPyprojectDependencies(multilineStringInput),
+    multilineStringExpected,
+    'table headers and dependency keys inside multiline strings are ignored',
+);
+
+const mixedCommentLayout = [
+    '[project]',
+    'dependencies = ["httpx", # HTTP client',
+    '    "openai-whisper", "fastapi"]',
+].join('\n');
+eq(
+    formatPyprojectDependencies(mixedCommentLayout),
+    mixedCommentLayout,
+    'ambiguous mixed-line comments are left untouched',
+);
+
+const leadingCommentLayout = [
+    '[project]',
+    'dependencies = [',
+    '    # HTTP client',
+    '    "httpx",',
+    '    "openai-whisper",',
+    ']',
+].join('\n');
+eq(
+    formatPyprojectDependencies(leadingCommentLayout),
+    leadingCommentLayout,
+    'standalone dependency comments are left untouched',
+);
+
 console.log('\nAll pyproject.toml tests passed.');
