@@ -1,0 +1,84 @@
+name: Publish Stable Extension
+
+run-name: Publish stable VSIX from ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: depdetangler-marketplace-stable
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Cache npm downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node24-vsce-3.9.2-${{ hashFiles('package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node24-vsce-3.9.2-
+
+      - name: Run tests
+        run: npm test
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "package.json version must be major.minor.patch, got: $VERSION" >&2
+            exit 1
+          fi
+
+          MINOR="$(cut -d. -f2 <<< "$VERSION")"
+          if (( MINOR % 2 != 0 )); then
+            echo "Stable releases must use an even minor version. Current version: $VERSION" >&2
+            echo "Example stable track: 0.2.x, 0.4.x, 1.0.x" >&2
+            exit 1
+          fi
+
+          VSIX="depdetangler-${VERSION}.vsix"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "vsix=$VSIX" >> "$GITHUB_OUTPUT"
+
+      - name: Package stable VSIX
+        run: npx --yes @vscode/vsce@3.9.2 package --out "${{ steps.version.outputs.vsix }}"
+
+      - name: Upload raw VSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.version.outputs.vsix }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish stable version to VS Code Marketplace
+        id: publish
+        continue-on-error: true
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@3.9.2 publish --packagePath "${{ steps.version.outputs.vsix }}"
+
+      - name: Fail workflow if Marketplace publish failed
+        if: steps.publish.outcome != 'success'
+        run: |
+          echo "Marketplace publishing failed. The VSIX artifact was uploaded successfully before publishing was attempted." >&2
+          exit 1
