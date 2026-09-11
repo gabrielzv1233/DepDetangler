@@ -1,7 +1,7 @@
 {
   "name": "depdetangler",
   "displayName": "DepDetangler",
-  "description": "Dependency Detangler for Python: opinionated, configurable formatting for pip requirements and selected imports.",
+  "description": "Dependency Detangler for Python: opinionated, configurable formatting for pip requirements, pyproject.toml dependencies, and selected imports.",
   "version": "0.2.7",
   "publisher": "Gabrielzv1233",
   "license": "GPL-3.0-only",
@@ -22,13 +22,14 @@
     "onCommand:depDetangler.clearPyPICache",
     "onLanguage:python",
     "onLanguage:pip-requirements",
+    "onLanguage:toml",
     "onCommand:depDetangler.organizeImports",
     "onCommand:depDetangler.sortPackages",
     "onCommand:depDetangler.organizePackages",
     "onCommand:depDetangler.sortModules",
     "onCommand:depDetangler.organizeModules"
   ],
-  "main": "./extension.js",
+  "main": "./src/extensionEntry.js",
   "contributes": {
     "commands": [
       {
@@ -149,7 +150,7 @@
     ]
   },
   "scripts": {
-    "test": "node test/run-tests.js"
+    "test": "node test/run-tests.js && node test/pyproject-tests.js"
   },
   "keywords": [
     "python",
@@ -160,6 +161,9 @@
     "sort",
     "organize",
     "packages",
-    "modules"
+    "modules",
+    "pyproject-toml",
+    "pyproject.toml",
+    "toml"
   ]
 }
