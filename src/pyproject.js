@@ -26,31 +26,183 @@ function readTomlString(text, start) {
     return -1;
 }
 
-function maskTomlNonCode(text) {
-    const masked = text.split('');
+function decodeTomlBasicString(inner, multiline = false) {
+    let value = '';
+    let index = 0;
 
-    for (let index = 0; index < text.length;) {
-        const char = text[index];
-        if (char === '#') {
-            while (index < text.length && text[index] !== '\n') {
-                if (text[index] !== '\r') masked[index] = ' ';
-                index++;
-            }
+    while (index < inner.length) {
+        if (inner[index] !== '\\') {
+            value += inner[index++];
             continue;
         }
 
-        if (char === '"' || char === "'") {
+        let next = index + 1;
+        if (multiline) {
+            while (next < inner.length && (inner[next] === ' ' || inner[next] === '\t')) next++;
+            if (inner[next] === '\n' || (inner[next] === '\r' && inner[next + 1] === '\n')) {
+                next += inner[next] === '\r' ? 2 : 1;
+                while (next < inner.length && /[ \t\r\n]/.test(inner[next])) next++;
+                index = next;
+                continue;
+            }
+        }
+
+        const escape = inner[index + 1];
+        const simple = {
+            b: '\b',
+            t: '\t',
+            n: '\n',
+            f: '\f',
+            r: '\r',
+            '"': '"',
+            '\\': '\\',
+        };
+        if (Object.hasOwn(simple, escape)) {
+            value += simple[escape];
+            index += 2;
+            continue;
+        }
+
+        if (escape === 'u' || escape === 'U') {
+            const size = escape === 'u' ? 4 : 8;
+            const hex = inner.slice(index + 2, index + 2 + size);
+            if (hex.length !== size || !/^[0-9A-Fa-f]+$/.test(hex)) return null;
+            const codePoint = Number.parseInt(hex, 16);
+            if (codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) return null;
+            value += String.fromCodePoint(codePoint);
+            index += size + 2;
+            continue;
+        }
+
+        return null;
+    }
+    return value;
+}
+
+function tomlStringValue(raw) {
+    const tripleLiteral = raw.startsWith("'''");
+    const tripleBasic = raw.startsWith('"""');
+    const triple = tripleLiteral || tripleBasic;
+    const delimiterLength = triple ? 3 : 1;
+    let inner = raw.slice(delimiterLength, -delimiterLength);
+
+    if (triple) {
+        if (inner.startsWith('\r\n')) inner = inner.slice(2);
+        else if (inner.startsWith('\n')) inner = inner.slice(1);
+    }
+
+    if (tripleLiteral || raw.startsWith("'")) return inner;
+    return decodeTomlBasicString(inner, tripleBasic);
+}
+
+function parseTomlKeySegment(text, start) {
+    let index = start;
+    while (index < text.length && /[ \t]/.test(text[index])) index++;
+    if (index >= text.length) return null;
+
+    if (text[index] === '"' || text[index] === "'") {
+        if (text.startsWith(text[index].repeat(3), index)) return null;
+        const end = readTomlString(text, index);
+        if (end < 0 || text.slice(index, end).includes('\n')) return null;
+        const value = tomlStringValue(text.slice(index, end));
+        if (value === null) return null;
+        return { value, end };
+    }
+
+    const match = text.slice(index).match(/^[A-Za-z0-9_-]+/);
+    if (!match) return null;
+    return { value: match[0], end: index + match[0].length };
+}
+
+function parseTomlKeyPath(text, start = 0) {
+    const segments = [];
+    let index = start;
+
+    while (true) {
+        const segment = parseTomlKeySegment(text, index);
+        if (!segment) return null;
+        segments.push(segment.value);
+        index = segment.end;
+        while (index < text.length && /[ \t]/.test(text[index])) index++;
+        if (text[index] !== '.') return { segments, end: index };
+        index++;
+    }
+}
+
+function lineInfo(text) {
+    const lines = [];
+    let start = 0;
+    while (start < text.length) {
+        const newline = text.indexOf('\n', start);
+        const end = newline < 0 ? text.length : newline + 1;
+        lines.push({ start, end, raw: text.slice(start, end) });
+        start = end;
+    }
+    if (!text.length) lines.push({ start: 0, end: 0, raw: '' });
+    return lines;
+}
+
+function documentStringSpans(text) {
+    const spans = [];
+    for (let index = 0; index < text.length;) {
+        if (text[index] === '#') {
+            while (index < text.length && text[index] !== '\n') index++;
+            continue;
+        }
+        if (text[index] === '"' || text[index] === "'") {
             const end = readTomlString(text, index);
             const stop = end < 0 ? text.length : end;
-            while (index < stop) {
-                if (text[index] !== '\n' && text[index] !== '\r') masked[index] = ' ';
-                index++;
-            }
+            spans.push({ start: index, end: stop });
+            index = stop;
             continue;
         }
         index++;
     }
-    return masked.join('');
+    return spans;
+}
+
+function lineStartsInsideString(lineStart, spans) {
+    return spans.some((span) => span.start < lineStart && span.end > lineStart);
+}
+
+function parseTableHeader(line) {
+    let index = 0;
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+    if (line[index] !== '[') return null;
+
+    const arrayTable = line[index + 1] === '[';
+    index += arrayTable ? 2 : 1;
+    const path = parseTomlKeyPath(line, index);
+    if (!path) return null;
+    index = path.end;
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+
+    if (arrayTable) {
+        if (line.slice(index, index + 2) !== ']]') return null;
+        index += 2;
+    } else {
+        if (line[index] !== ']') return null;
+        index++;
+    }
+
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+    if (line[index] === '#') return { segments: path.segments, arrayTable };
+    if (index !== line.length) return null;
+    return { segments: path.segments, arrayTable };
+}
+
+function parseArrayAssignment(line) {
+    let index = 0;
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+    const path = parseTomlKeyPath(line, index);
+    if (!path) return null;
+    index = path.end;
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+    if (line[index] !== '=') return null;
+    index++;
+    while (index < line.length && /[ \t]/.test(line[index])) index++;
+    if (line[index] !== '[') return null;
+    return { segments: path.segments, openIndex: index };
 }
 
 function tomlCommentOffsets(text) {
@@ -70,16 +222,6 @@ function tomlCommentOffsets(text) {
         index++;
     }
     return offsets;
-}
-
-function tomlStringValue(raw) {
-    if (raw.startsWith("'''")) return raw.slice(3, -3);
-    if (raw.startsWith("'")) return raw.slice(1, -1);
-    if (raw.startsWith('"""')) {
-        const inner = raw.slice(3, -3);
-        try { return JSON.parse(`"${inner.replace(/"/g, '\\"')}"`); } catch { return inner; }
-    }
-    try { return JSON.parse(raw); } catch { return raw.slice(1, -1); }
 }
 
 function findArrayEnd(text, openIndex) {
@@ -114,23 +256,12 @@ function stringSpans(body) {
         const end = readTomlString(body, index);
         if (end < 0) return [];
         const raw = body.slice(index, end);
-        spans.push({ start: index, end, raw, value: tomlStringValue(raw) });
+        const value = tomlStringValue(raw);
+        if (value === null) return [];
+        spans.push({ start: index, end, raw, value });
         index = end - 1;
     }
     return spans;
-}
-
-function lineInfo(body) {
-    const lines = [];
-    let start = 0;
-    while (start < body.length) {
-        const newline = body.indexOf('\n', start);
-        const end = newline < 0 ? body.length : newline + 1;
-        lines.push({ start, end, raw: body.slice(start, end) });
-        start = end;
-    }
-    if (!body.length) lines.push({ start: 0, end: 0, raw: '' });
-    return lines;
 }
 
 function formatArrayBody(body) {
@@ -219,12 +350,18 @@ function formatArrayBody(body) {
     return result + body.slice(cursor);
 }
 
-function projectRanges(text, syntax = maskTomlNonCode(text)) {
+function projectRanges(text, lines, spans) {
     const headers = [];
-    const headerPattern = /^[ \t]*\[(?!\[)([^\]\r\n]+)\][ \t]*$/gm;
-    let match;
-    while ((match = headerPattern.exec(syntax))) {
-        headers.push({ name: match[1].trim(), start: match.index, end: headerPattern.lastIndex });
+    for (const line of lines) {
+        if (lineStartsInsideString(line.start, spans)) continue;
+        const raw = line.raw.replace(/\r?\n$/, '');
+        const header = parseTableHeader(raw);
+        if (!header) continue;
+        headers.push({
+            ...header,
+            start: line.start,
+            end: line.end,
+        });
     }
 
     const ranges = [];
@@ -232,9 +369,10 @@ function projectRanges(text, syntax = maskTomlNonCode(text)) {
     else ranges.push({ start: 0, end: text.length, dotted: true });
 
     for (let index = 0; index < headers.length; index++) {
-        if (headers[index].name !== 'project') continue;
+        const header = headers[index];
+        if (header.arrayTable || header.segments.length !== 1 || header.segments[0] !== 'project') continue;
         ranges.push({
-            start: headers[index].end,
+            start: header.end,
             end: headers[index + 1]?.start ?? text.length,
             dotted: false,
         });
@@ -243,16 +381,26 @@ function projectRanges(text, syntax = maskTomlNonCode(text)) {
 }
 
 function formatPyprojectDependencies(text) {
-    const syntax = maskTomlNonCode(text);
+    const lines = lineInfo(text);
+    const documentSpans = documentStringSpans(text);
     const replacements = [];
-    for (const range of projectRanges(text, syntax)) {
-        const section = syntax.slice(range.start, range.end);
-        const pattern = range.dotted
-            ? /^[ \t]*project[ \t]*\.[ \t]*dependencies[ \t]*=[ \t]*\[/gm
-            : /^[ \t]*dependencies[ \t]*=[ \t]*\[/gm;
-        let match;
-        while ((match = pattern.exec(section))) {
-            const openIndex = range.start + match.index + match[0].lastIndexOf('[');
+
+    for (const range of projectRanges(text, lines, documentSpans)) {
+        for (const line of lines) {
+            if (line.start < range.start || line.start >= range.end) continue;
+            if (lineStartsInsideString(line.start, documentSpans)) continue;
+
+            const raw = line.raw.replace(/\r?\n$/, '');
+            const assignment = parseArrayAssignment(raw);
+            if (!assignment) continue;
+            const wanted = range.dotted
+                ? assignment.segments.length === 2
+                    && assignment.segments[0] === 'project'
+                    && assignment.segments[1] === 'dependencies'
+                : assignment.segments.length === 1 && assignment.segments[0] === 'dependencies';
+            if (!wanted) continue;
+
+            const openIndex = line.start + assignment.openIndex;
             const closeIndex = findArrayEnd(text, openIndex);
             if (closeIndex < 0 || closeIndex >= range.end) continue;
             const body = text.slice(openIndex + 1, closeIndex);
@@ -260,7 +408,6 @@ function formatPyprojectDependencies(text) {
             if (formatted !== body) {
                 replacements.push({ start: openIndex + 1, end: closeIndex, text: formatted });
             }
-            pattern.lastIndex = closeIndex - range.start + 1;
         }
     }
 
